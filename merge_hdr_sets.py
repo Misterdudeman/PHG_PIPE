@@ -2,6 +2,9 @@ import argparse
 import filetype
 import logging
 import os
+import re
+import time
+# Write HDRMerge install location in .ini
 
 
 class merg_hdr_sets(object):
@@ -121,7 +124,7 @@ class merg_hdr_sets(object):
         lr_len = len(lr_list)
         if hr_len != lr_len:
             logging.warning("High Res Images do not match proxy.")
-        elif len(bin_list) > max(len(hr)):
+        elif len(bin_list) > max(hr_len, lr_len):
             logging.warning("Too many unrecognized files.")
 
     def make_set(self, high, low):
@@ -129,24 +132,75 @@ class merg_hdr_sets(object):
         self.high = high
         self.low = low
 
+        self.__str__,
+        self.__repr__ = "High Res: {} :: Low Res: {} ".format(high, low)
+        return self
+
+    def check_matching(self, set, steps):
+        """Check if images match."""
+        is_matching = False
+        counter = 0
+
+        for (high, low) in zip(set.high, set.low):
+            h = re.findall("\d{3}.", high)[0]
+            l = re.findall("\d{3}.", low)[0]
+            if counter == steps:
+                is_matching = True
+
+            if h == l:
+                counter = counter + 1
+        return is_matching
+
     def sort_image_sets(self, sorted_lists, steps):
         """Sort images into sets."""
+        steps = steps-1
         counter = 0
         set_count = 0
+        # Set up image sets
         high_set_list = []
         low_set_list = []
-        for high, low in enumerate(sorted_lists):
-            print(counter)
-            if counter >= steps:
-                set_count += 1
-                logging.info("Set: " + set_count)
+        set_list = []
+
+        discared = []
+
+        high = sorted_lists[0]
+        low = sorted_lists[1]
+
+        for (high, low) in zip(high, low):
+            if counter > steps:
+                # Write file moving function
+                # Write HDRI processing function with HDRMerge hooks
+
+                # Make image set
+                image_set = self.make_set(high_set_list, low_set_list)
+                # Append image set to set_list
+                check = self.check_matching(image_set, steps)
+                if check:
+                    set_list.append(image_set)
+                    # Reset image_set_lists
+                    high_set_list = []
+                    low_set_list = []
+                    # Add 1 to Set Counter
+                    set_count += 1
+                    logging.info("Set: " + str(image_set.high)
+                                 + " " + str(image_set.low))
+                else:
+                    discared.append(image_set)
+                    logging.warning("Set: " + str(image_set.high)
+                                    + " " + str(image_set.low) + " DISCARDED")
                 counter = 0
             else:
+                high_set_list.append(high)
+                low_set_list.append(low)
+                logging.info("Adding High: " + str(high))
+                logging.info("Adding Low: " + str(low))
                 counter += 1
+        return set_list
 
 if __name__ == "__main__":
     mhs = merg_hdr_sets()
     mhs.parse_args(['--s 3', '--r'])
     mhs.logging(mhs.verbose)
     images = mhs.get_image_types(mhs.args, mhs.cwd)
+    mhs.check_lists(images)
     mhs.sort_image_sets(images, mhs.steps)
