@@ -28,9 +28,10 @@ class merg_hdr_sets(object):
 
     """
 
-    def __init__(self, steps=None, recursive=None,
+    def __init__(self, name=None, steps=None, recursive=None,
                  verbose=None, high=None, low=None, cwd=None):
         """Initialize class arguments."""
+        self.name = name
         self.steps = steps
         self.recursive = recursive
         self.verbose = verbose
@@ -42,13 +43,18 @@ class merg_hdr_sets(object):
         """Initialize logging."""
         logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger(__name__)
-        logger.propagate = verbose
+        if not verbose:
+            logging.disable(logging.INFO)
+            logging.disable(logging.WARN)
         logger.info('Starting logs')
 
     def parse_args(self, argv=None):
         """Parse Args from class and argparse."""
         parser = argparse.ArgumentParser(
                         description="Ingest and process image sets into HDRIs")
+        parser.add_argument('-n',
+                            type=str, help='Photo set name',
+                            default=None)
         parser.add_argument('-s',
                             type=int, help='steps per set',
                             default=3)
@@ -69,12 +75,17 @@ class merg_hdr_sets(object):
 
         args, not_used = parser.parse_known_args(argv)
         self.args = args
+        self.cwd = os.getcwd()
+        self.name = args.n
+        print(args.n)
+        if self.name is None:
+            self.name = os.path.dirname(self.cwd)
+        print(self.name)
         self.steps = args.s
         self.recursive = args.r
         self.verbose = args.v
         self.high = args.hi
         self.low = args.lo
-        self.cwd = os.getcwd()
 
     def sort_by_type(self, files, file_list, type_list):
         """Sorts files into type lists."""
@@ -117,15 +128,114 @@ class merg_hdr_sets(object):
                 out_lists = self.sort_by_type(files, file_list, type_list)
         return out_lists
 
+    def match_pairs(self, list1, list2, verbose):
+        """Take 2 lists and return bool list of matching pairs."""
+        pair_match = []
+        for index, (item1, item2) in enumerate(zip(list1, list2)):
+            if item1 == item2:
+                pair_match.append(True)
+                if verbose:
+                    logging.info('{} and {} are a match'.format(item1, item2))
+            else:
+                pair_match.append(False)
+                if verbose:
+                    logging.info('{} and {} are not the same'.format(item1,
+                                                                     item2))
+        return pair_match
+
+    def numbers_list(self, list):
+        """List of numbers from list of names."""
+        numbers_list = []
+        for item in list:
+            n = re.findall("\d{3}.", item)[0]
+            numbers_list.append(n)
+        return numbers_list
+
+    def list_math(self, list1, list2, ops='out', index=False):
+        """Return list items or list indexs by operation."""
+        if ops == 'out':
+            if index:
+                new_list = [i for i, x in enumerate(list1) if x not in list2]
+            else:
+                new_list = [x for i, x in enumerate(list1) if x not in list2]
+        elif ops == 'in':
+            if index:
+                new_list = [i for i, x in enumerate(list1) if x in list2]
+            else:
+                new_list = [x for i, x in enumerate(list1) if x in list2]
+        elif ops == 'match':
+            if index:
+                new_list = [i for i, x in enumerate(list1) if i in list2]
+            else:
+                new_list = [x for i, x in enumerate(list1) if i in list2]
+        else:
+            raise Exception('Ops requires in, out or match operation')
+        return new_list
+
+    def remove_non_matching(self, list1, list2):
+        """Remove none matching elements from 2 lists."""
+        num_list1 = self.numbers_list(list1)
+        num_list2 = self.numbers_list(list2)
+        logging.debug("NUMBERS LISTS: {}, {} ".format(num_list1, num_list2))
+
+        num_idx_list1_remove = self.list_math(num_list1, num_list2, index=True)
+        num_idx_list2_remove = self.list_math(num_list2, num_list1, index=True)
+        logging.debug("NUMBERS TO REMOVE: {}, {}".format(num_idx_list1_remove,
+                                                         num_idx_list2_remove))
+
+        num_list1_clean = self.list_math(num_list1, num_list2)
+        num_list2_clean = self.list_math(num_list2, num_list1)
+        logging.debug("CLEAN NUMBERS LIST: {}, {}".format(num_list1_clean,
+                                                          num_list2_clean))
+
+        list1_remove = self.list_math(list1, num_idx_list1_remove, ops='match')
+        list2_remove = self.list_math(list2, num_idx_list2_remove, ops='match')
+        logging.debug("REMOVE LIST: {}, {}".format(list1_remove, list2_remove))
+
+        list1_clean = self.list_math(list1, list1_remove, ops='out')
+        list2_clean = self.list_math(list2, list2_remove, ops='out')
+        logging.debug("CLEAN LIST: {}, {}".format(list1_clean, list2_clean))
+
+        match_list = self.match_pairs(num_list1_clean,
+                                      num_list2_clean,
+                                      mhs.verbose)
+        new_list1 = []
+        new_list2 = []
+        matching = [new_list1, new_list2]
+        bin1 = []
+        bin2 = []
+        non_matching = [bin1, bin2]
+        for idx, (item1, item2, match) in enumerate(zip(list1_clean,
+                                                        list2_clean,
+                                                        match_list)):
+            print(item1, item2, match)
+            if match:
+                new_list1.append(item1)
+                new_list2.append(item2)
+            else:
+                bin1.append(item1)
+                bin2.append(item1)
+                logging.warn(("{}:: {} and {}" +
+                             "do not match. Removed").format(idx,
+                                                             item1,
+                                                             item2))
+        return matching, non_matching
+
     def check_lists(self, sorted_lists):
         """Check image lists and throw warnings."""
         hr_list, lr_list, bin_list = sorted_lists
-        hr_len = len(hr_list)
-        lr_len = len(lr_list)
+        matching, non_matching = self.remove_non_matching(hr_list, lr_list)
+        print(matching)
+        hr_list_new = sorted(matching[0])
+        lr_list_new = sorted(matching[1])
+        cleaned_list = [hr_list_new, lr_list_new]
+        hr_len = len(hr_list_new)
+        lr_len = len(lr_list_new)
         if hr_len != lr_len:
             logging.warning("High Res Images do not match proxy.")
         elif len(bin_list) > max(hr_len, lr_len):
             logging.warning("Too many unrecognized files.")
+        return cleaned_list
 
     def make_set(self, high, low):
         """Make image set."""
@@ -136,8 +246,8 @@ class merg_hdr_sets(object):
         self.__repr__ = "High Res: {} :: Low Res: {} ".format(high, low)
         return self
 
-    def check_matching(self, set, steps):
-        """Check if images match."""
+    def set_check_matching(self, set, steps):
+        """Check if image sets match."""
         is_matching = False
         counter = 0
 
@@ -148,6 +258,7 @@ class merg_hdr_sets(object):
                 is_matching = True
 
             if h == l:
+                logging.info("{} and {} match!".format(high, low))
                 counter = counter + 1
         return is_matching
 
@@ -161,12 +272,12 @@ class merg_hdr_sets(object):
         low_set_list = []
         set_list = []
 
-        discared = []
+        discarded = []
 
         high = sorted_lists[0]
         low = sorted_lists[1]
 
-        for (high, low) in zip(high, low):
+        for (hi, lo) in zip(high, low):
             if counter > steps:
                 # Write file moving function
                 # Write HDRI processing function with HDRMerge hooks
@@ -174,7 +285,7 @@ class merg_hdr_sets(object):
                 # Make image set
                 image_set = self.make_set(high_set_list, low_set_list)
                 # Append image set to set_list
-                check = self.check_matching(image_set, steps)
+                check = self.set_check_matching(image_set, steps)
                 if check:
                     set_list.append(image_set)
                     # Reset image_set_lists
@@ -185,22 +296,70 @@ class merg_hdr_sets(object):
                     logging.info("Set: " + str(image_set.high)
                                  + " " + str(image_set.low))
                 else:
-                    discared.append(image_set)
+                    discarded.append(image_set)
                     logging.warning("Set: " + str(image_set.high)
                                     + " " + str(image_set.low) + " DISCARDED")
+                    high_set_list = []
+                    low_set_list = []
                 counter = 0
             else:
-                high_set_list.append(high)
-                low_set_list.append(low)
-                logging.info("Adding High: " + str(high))
-                logging.info("Adding Low: " + str(low))
+                high_set_list.append(hi)
+                low_set_list.append(lo)
+                logging.info("Adding High: " + str(hi))
+                logging.info("Adding Low: " + str(lo))
                 counter += 1
         return set_list
 
+    def folder_name(self, images, steps, type=None):
+        """Make folder name."""
+        print(images)
+        first = images[0].split('.')[0]
+        last = images[steps].split('.')[0][-2:]
+        fname = first + '-' + last
+        if type is None:
+            return fname
+        else:
+            fname_type = fname + '_{}'.format(type)
+            top = re.findall("\d{3}.", fname)[0]
+            return top, fname_type
+
+    def build_folders(self, args, cwd, set, steps, name=None):
+        """Build folders based on set."""
+        # Shift number of steps to last index
+        steps = steps-1
+        parent = self.folder_name(set.high, steps)
+        folder_name_high = self.folder_name(set.high, steps, args.hi)
+        folder_name_low = self.folder_name(set.low, steps, args.lo)
+
+        print(folder_name_high)
+        print(folder_name_low)
+
+        if name:
+            root = name
+            high_dir = os.path.join(cwd, root, parent, folder_name_high[1])
+            low_dir = os.path.join(cwd, root, parent, folder_name_low[1])
+
+        else:
+            high_dir = os.path.join(cwd, parent, folder_name_high[1])
+            low_dir = os.path.join(cwd, parent, folder_name_low[1])
+
+        if not os.path.exists(high_dir):
+            os.makedirs(high_dir)
+
+        if not os.path.exists(low_dir):
+            os.makedirs(low_dir)
+
+    #def match_numbers(self, )
+
 if __name__ == "__main__":
     mhs = merg_hdr_sets()
-    mhs.parse_args(['--s 3', '--r'])
+    mhs.parse_args(['--n Intersection', '--s 3', '--r', '--v'])
     mhs.logging(mhs.verbose)
     images = mhs.get_image_types(mhs.args, mhs.cwd)
-    mhs.check_lists(images)
-    mhs.sort_image_sets(images, mhs.steps)
+    logging.info("==============got=images===============")
+    matching = mhs.check_lists(images)
+    logging.info("=============check=lists===============")
+    sets = mhs.sort_image_sets(matching, mhs.steps)
+    logging.info("=============sort=images===============")
+    for set in sets:
+        mhs.build_folders(mhs.args, mhs.cwd, set, mhs.steps, mhs.name)
