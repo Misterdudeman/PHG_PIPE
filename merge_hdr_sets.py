@@ -7,6 +7,17 @@ import time
 # Write HDRMerge install location in .ini
 
 
+class image_set(object):
+    """Image set class for processing pairs."""
+
+    def __init__(self, high, low):
+        """Make image set."""
+        self.high = high
+        self.low = low
+        self.__str__,
+        self.__repr__ = "High Res: {} :: Low Res: {} ".format(high, low)
+
+
 class merg_hdr_sets(object):
     """
     Merge Image Sets into HDRIs.
@@ -183,10 +194,10 @@ class merg_hdr_sets(object):
         logging.debug("NUMBERS TO REMOVE: {}, {}".format(num_idx_list1_remove,
                                                          num_idx_list2_remove))
 
-        num_list1_clean = self.list_math(num_list1, num_list2)
-        num_list2_clean = self.list_math(num_list2, num_list1)
-        logging.debug("CLEAN NUMBERS LIST: {}, {}".format(num_list1_clean,
-                                                          num_list2_clean))
+        num_list1_clean = self.list_math(num_list1, num_list2, ops='in')
+        num_list2_clean = self.list_math(num_list2, num_list1, ops='in')
+        logging.info("CLEAN NUMBERS LIST: {}, {}".format(num_list1_clean,
+                                                         num_list2_clean))
 
         list1_remove = self.list_math(list1, num_idx_list1_remove, ops='match')
         list2_remove = self.list_math(list2, num_idx_list2_remove, ops='match')
@@ -199,6 +210,7 @@ class merg_hdr_sets(object):
         match_list = self.match_pairs(num_list1_clean,
                                       num_list2_clean,
                                       mhs.verbose)
+
         new_list1 = []
         new_list2 = []
         matching = [new_list1, new_list2]
@@ -208,7 +220,6 @@ class merg_hdr_sets(object):
         for idx, (item1, item2, match) in enumerate(zip(list1_clean,
                                                         list2_clean,
                                                         match_list)):
-            print(item1, item2, match)
             if match:
                 new_list1.append(item1)
                 new_list2.append(item2)
@@ -225,7 +236,6 @@ class merg_hdr_sets(object):
         """Check image lists and throw warnings."""
         hr_list, lr_list, bin_list = sorted_lists
         matching, non_matching = self.remove_non_matching(hr_list, lr_list)
-        print(matching)
         hr_list_new = sorted(matching[0])
         lr_list_new = sorted(matching[1])
         cleaned_list = [hr_list_new, lr_list_new]
@@ -237,15 +247,6 @@ class merg_hdr_sets(object):
             logging.warning("Too many unrecognized files.")
         return cleaned_list
 
-    def make_set(self, high, low):
-        """Make image set."""
-        self.high = high
-        self.low = low
-
-        self.__str__,
-        self.__repr__ = "High Res: {} :: Low Res: {} ".format(high, low)
-        return self
-
     def set_check_matching(self, set, steps):
         """Check if image sets match."""
         is_matching = False
@@ -254,12 +255,14 @@ class merg_hdr_sets(object):
         for (high, low) in zip(set.high, set.low):
             h = re.findall("\d{3}.", high)[0]
             l = re.findall("\d{3}.", low)[0]
-            if counter == steps:
-                is_matching = True
 
             if h == l:
                 logging.info("{} and {} match!".format(high, low))
                 counter = counter + 1
+
+            if counter > steps:
+                is_matching = True
+                logging.info("Set Match!")
         return is_matching
 
     def sort_image_sets(self, sorted_lists, steps):
@@ -279,26 +282,25 @@ class merg_hdr_sets(object):
 
         for (hi, lo) in zip(high, low):
             if counter > steps:
-                # Write file moving function
-                # Write HDRI processing function with HDRMerge hooks
-
                 # Make image set
-                image_set = self.make_set(high_set_list, low_set_list)
+                img_set = image_set(high_set_list, low_set_list)
+
                 # Append image set to set_list
-                check = self.set_check_matching(image_set, steps)
+                check = self.set_check_matching(img_set, steps)
+
                 if check:
-                    set_list.append(image_set)
+                    set_list.append(img_set)
                     # Reset image_set_lists
                     high_set_list = []
                     low_set_list = []
                     # Add 1 to Set Counter
                     set_count += 1
-                    logging.info("Set: " + str(image_set.high)
-                                 + " " + str(image_set.low))
+                    logging.info("Set: " + str(img_set.high)
+                                 + " " + str(img_set.low))
                 else:
-                    discarded.append(image_set)
-                    logging.warning("Set: " + str(image_set.high)
-                                    + " " + str(image_set.low) + " DISCARDED")
+                    discarded.append(img_set)
+                    logging.warning("Set: " + str(img_set.high)
+                                    + " " + str(img_set.low) + " DISCARDED")
                     high_set_list = []
                     low_set_list = []
                 counter = 0
@@ -312,7 +314,6 @@ class merg_hdr_sets(object):
 
     def folder_name(self, images, steps, type=None):
         """Make folder name."""
-        print(images)
         first = images[0].split('.')[0]
         last = images[steps].split('.')[0][-2:]
         fname = first + '-' + last
@@ -331,9 +332,6 @@ class merg_hdr_sets(object):
         folder_name_high = self.folder_name(set.high, steps, args.hi)
         folder_name_low = self.folder_name(set.low, steps, args.lo)
 
-        print(folder_name_high)
-        print(folder_name_low)
-
         if name:
             root = name
             high_dir = os.path.join(cwd, root, parent, folder_name_high[1])
@@ -349,17 +347,19 @@ class merg_hdr_sets(object):
         if not os.path.exists(low_dir):
             os.makedirs(low_dir)
 
-    #def match_numbers(self, )
-
 if __name__ == "__main__":
     mhs = merg_hdr_sets()
-    mhs.parse_args(['--n Intersection', '--s 3', '--r', '--v'])
+    mhs.parse_args(['--n Intersection', '--s 3', '--r'])
     mhs.logging(mhs.verbose)
     images = mhs.get_image_types(mhs.args, mhs.cwd)
+    # logging.info(images)
     logging.info("==============got=images===============")
+
     matching = mhs.check_lists(images)
+    # logging.info(matching)
     logging.info("=============check=lists===============")
     sets = mhs.sort_image_sets(matching, mhs.steps)
     logging.info("=============sort=images===============")
     for set in sets:
+        pass
         mhs.build_folders(mhs.args, mhs.cwd, set, mhs.steps, mhs.name)
