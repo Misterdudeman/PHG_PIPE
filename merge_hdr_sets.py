@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+import shutil
 # Write HDRMerge install location in .ini
 
 
@@ -14,8 +15,22 @@ class image_set(object):
         """Make image set."""
         self.high = high
         self.low = low
+        self.path_high = None
+        self.path_low = None
+        self.path_hdr = None
         self.__str__,
         self.__repr__ = "High Res: {} :: Low Res: {} ".format(high, low)
+
+    # def set_path(self, path, set_path=""):
+    #     """Set Image set paths."""
+    #     if set_path == "high":
+    #         self.path_high = path
+    #
+    #     if set_path == "low":
+    #         self.path_low = path
+    #
+    #     else:
+    #         raise ValueError('set_path must be high or low')
 
 
 class merg_hdr_sets(object):
@@ -88,10 +103,12 @@ class merg_hdr_sets(object):
         self.args = args
         self.cwd = os.getcwd()
         self.name = args.n
-        print(args.n)
         if self.name is None:
-            self.name = os.path.dirname(self.cwd)
-        print(self.name)
+            self.name = os.path.basename(self.cwd)
+        else:
+            self.name = self.name.lstrip()
+            self.name = self.name.replace(" ", "_")
+
         self.steps = args.s
         self.recursive = args.r
         self.verbose = args.v
@@ -236,6 +253,7 @@ class merg_hdr_sets(object):
         """Check image lists and throw warnings."""
         hr_list, lr_list, bin_list = sorted_lists
         matching, non_matching = self.remove_non_matching(hr_list, lr_list)
+        print(bin_list, non_matching)
         hr_list_new = sorted(matching[0])
         lr_list_new = sorted(matching[1])
         cleaned_list = [hr_list_new, lr_list_new]
@@ -310,7 +328,7 @@ class merg_hdr_sets(object):
                 logging.info("Adding High: " + str(hi))
                 logging.info("Adding Low: " + str(lo))
                 counter += 1
-        return set_list
+        return set_list, discarded
 
     def folder_name(self, images, steps, type=None):
         """Make folder name."""
@@ -321,8 +339,8 @@ class merg_hdr_sets(object):
             return fname
         else:
             fname_type = fname + '_{}'.format(type)
-            top = re.findall("\d{3}.", fname)[0]
-            return top, fname_type
+            # top = re.findall("\d{3}.", fname)[0]
+            return fname_type
 
     def build_folders(self, args, cwd, set, steps, name=None):
         """Build folders based on set."""
@@ -331,25 +349,56 @@ class merg_hdr_sets(object):
         parent = self.folder_name(set.high, steps)
         folder_name_high = self.folder_name(set.high, steps, args.hi)
         folder_name_low = self.folder_name(set.low, steps, args.lo)
+        folder_name_hdr = self.folder_name(set.high, steps, "hdr")
 
         if name:
-            root = name
-            high_dir = os.path.join(cwd, root, parent, folder_name_high[1])
-            low_dir = os.path.join(cwd, root, parent, folder_name_low[1])
+            root = os.path.join(self.cwd, name)
+            high_dir = os.path.join(cwd, root, parent, folder_name_high)
+            low_dir = os.path.join(cwd, root, parent, folder_name_low)
+            hdr_dir = os.path.join(cwd, root, parent, folder_name_hdr)
 
         else:
-            high_dir = os.path.join(cwd, parent, folder_name_high[1])
-            low_dir = os.path.join(cwd, parent, folder_name_low[1])
+            root = cwd
+            high_dir = os.path.join(cwd, parent, folder_name_high)
+            low_dir = os.path.join(cwd, parent, folder_name_low)
+            hdr_dir = os.path.join(cwd, parent, folder_name_hdr)
 
         if not os.path.exists(high_dir):
             os.makedirs(high_dir)
 
+        set.path_high = high_dir
+
         if not os.path.exists(low_dir):
             os.makedirs(low_dir)
 
+        set.path_low = low_dir
+
+        if not os.path.exists(hdr_dir):
+            os.makedirs(hdr_dir)
+
+        set.path_hdr = hdr_dir
+        return set
+
+    def move_set(self, set):
+        """Move image set to folders."""
+        high_set = set.high
+        low_set = set.low
+        high_dir = set.path_high
+        low_dir = set.path_low
+        logging.info(high_dir)
+
+        for h, l in zip(high_set, low_set):
+            hi = os.path.join(self.cwd, h)
+            lo = os.path.join(self.cwd, l)
+
+            if hi != high_dir:
+                shutil.move(hi, high_dir)
+            if lo != low_dir:
+                shutil.move(lo, low_dir)
+
 if __name__ == "__main__":
     mhs = merg_hdr_sets()
-    mhs.parse_args(['--n Intersection', '--s 3', '--r'])
+    mhs.parse_args(['-n Intersection', '--s 3', '--r', '--v'])
     mhs.logging(mhs.verbose)
     images = mhs.get_image_types(mhs.args, mhs.cwd)
     # logging.info(images)
@@ -358,8 +407,9 @@ if __name__ == "__main__":
     matching = mhs.check_lists(images)
     # logging.info(matching)
     logging.info("=============check=lists===============")
-    sets = mhs.sort_image_sets(matching, mhs.steps)
+    sets, bin = mhs.sort_image_sets(matching, mhs.steps)
+    print(bin)
     logging.info("=============sort=images===============")
     for set in sets:
-        pass
-        mhs.build_folders(mhs.args, mhs.cwd, set, mhs.steps, mhs.name)
+        set = mhs.build_folders(mhs.args, mhs.cwd, set, mhs.steps, mhs.name)
+        mhs.move_set(set)
